@@ -128,6 +128,7 @@
                         <el-table-column label="价格" width="100"><template #default="scope">¥[[ scope.row.package_price ]]</template></el-table-column>
                         <el-table-column prop="start_time" label="开始" width="170"></el-table-column>
                         <el-table-column prop="end_time" label="结束" width="170"></el-table-column>
+                        <el-table-column prop="duration" label="实际时长" width="120"></el-table-column>
                         <el-table-column label="状态" width="100"><template #default="scope">
                             <el-tag v-if="scope.row.charged" type="success">已收费</el-tag>
                             <el-tag v-else type="danger">未收费</el-tag>
@@ -247,10 +248,17 @@
                 async clickSeat(num) {
                     if (this.seats[num]) {
                         try {
-                            await this.$confirm(`${num}号座位正在使用中，是否结束计时？`, '确认', { type: 'warning' });
+                            await this.$confirm(`${num}号座位正在使用中，是否结束计时？`, '确认', { type: 'warning', confirmButtonText: 'OK', cancelButtonText: 'Cancel' });
                             const data = await (await fetch(`${API_BASE}/seats/${num}/stop`, { method: 'POST' })).json();
-                            if (data.success) this.$message.success(`计时已结束`);
-                        } catch {}
+                            if (data.success) {
+                                this.$message.success(`计时已结束`);
+                                this.loadSeats();
+                            } else {
+                                this.$message.error('结束失败：' + (data.error || '未知错误'));
+                            }
+                        } catch(e) {
+                            // 用户点击取消，不做任何操作
+                        }
                     } else {
                         this.startForm = { seatNum: `${num}号`, packageId: null, customerInfo: '', currentSeatNum: num };
                         this.startDialog = true;

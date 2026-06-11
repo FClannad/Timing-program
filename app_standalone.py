@@ -45,9 +45,6 @@ class Database:
                 结束时间 TEXT,
                 使用时长 TEXT,
                 顾客信息 TEXT,
-                会员ID INTEGER,
-                优惠券ID INTEGER,
-                实付金额 REAL,
                 日期 TEXT,
                 已收费 INTEGER DEFAULT 0
             )
@@ -139,26 +136,12 @@ def stop_timing(seat_num):
     end_time = datetime.now()
     duration = end_time - start_time
 
-    # 计算实付金额
-    actual_price = seat['package_price']
-    if seat.get('coupon_id'):
-        conn = db.get_conn()
-        cursor = conn.cursor()
-        cursor.execute('SELECT 折扣, 满减金额 FROM 优惠券 WHERE id = ?', (seat['coupon_id'],))
-        coupon = cursor.fetchone()
-        if coupon:
-            if coupon[0]:  # 折扣
-                actual_price = actual_price * coupon[0]
-            elif coupon[1]:  # 满减
-                actual_price = max(0, actual_price - coupon[1])
-        conn.close()
-
     conn = db.get_conn()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO 计时记录 (座位号, 套餐名称, 套餐时长, 套餐价格, 开始时间, 结束时间, 使用时长,
-                             顾客信息, 会员ID, 优惠券ID, 实付金额, 日期, 已收费)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             顾客信息, 日期, 已收费)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         seat_num,
         seat['package_name'],
@@ -167,10 +150,7 @@ def stop_timing(seat_num):
         start_time.strftime('%Y-%m-%d %H:%M:%S'),
         end_time.strftime('%Y-%m-%d %H:%M:%S'),
         str(timedelta(seconds=int(duration.total_seconds()))),
-        seat['customer_info'],
-        seat.get('member_id'),
-        seat.get('coupon_id'),
-        actual_price,
+        seat.get('customer_info', ''),
         datetime.now().strftime('%Y-%m-%d'),
         0
     ))
@@ -182,14 +162,14 @@ def stop_timing(seat_num):
         'success': True,
         'duration': str(timedelta(seconds=int(duration.total_seconds()))),
         'original_price': seat['package_price'],
-        'actual_price': actual_price
+        'actual_price': seat['package_price']
     })
 
 @app.route('/api/seats/<int:seat_num>/charge', methods=['POST'])
 def charge_seat(seat_num):
     conn = db.get_conn()
     cursor = conn.cursor()
-    cursor.execute('UPDATE 计时记录 SET 已收费 = 1 WHERE 座位号 = ? AND 已收费 = 0 ORDER BY id DESC LIMIT 1', (seat_num,))
+    cursor.execute('UPDATE 计时记录 SET 已收费 = 1 WHERE id = (SELECT id FROM 计时记录 WHERE 座位号 = ? AND 已收费 = 0 ORDER BY id DESC LIMIT 1)', (seat_num,))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -328,11 +308,8 @@ def get_records():
         'end_time': row[6],
         'duration': row[7],
         'customer_info': row[8],
-        'member_id': row[9],
-        'coupon_id': row[10],
-        'actual_price': row[11],
-        'date': row[12],
-        'charged': row[13]
+        'date': row[9],
+        'charged': row[10]
     } for row in cursor.fetchall()]
     conn.close()
     return jsonify(records)
@@ -343,14 +320,14 @@ def get_today_stats():
     conn = db.get_conn()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT SUM(实付金额) FROM 计时记录 WHERE 日期 = ? AND 已收费 = 1', (today,))
+    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 = ? AND 已收费 = 1', (today,))
     total_income = cursor.fetchone()[0] or 0
 
-    cursor.execute('SELECT SUM(实付金额) FROM 计时记录 WHERE 日期 = ? AND 已收费 = 0', (today,))
+    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 = ? AND 已收费 = 0', (today,))
     unpaid = cursor.fetchone()[0] or 0
 
     cursor.execute('''
-        SELECT 套餐名称, COUNT(*), SUM(实付金额)
+        SELECT 套餐名称, COUNT(*), SUM(套餐价格)
         FROM 计时记录
         WHERE 日期 = ?
         GROUP BY 套餐名称
