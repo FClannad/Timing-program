@@ -1,0 +1,4 @@
+flask>=3.0.0
+flask-cors>=6.0.0
+customtkinter>=5.2.0
+darkdetect>=0.8.0

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(pip install PyQt5==5.15.10)",
+      "PowerShell(pip install pyinstaller)",
+      "PowerShell(python \"ƴ����ʱϵͳ.py\")"
+    ]
+  }
+}

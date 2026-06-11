@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>拼豆店计时管理系统</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: #f5f7fa; }
+        .header { background: linear-gradient(135deg, #ffd4e5 0%, #ffadd2 100%); color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .container { max-width: 1400px; margin: 1.5rem auto; padding: 0 1rem; }
+        .card { background: white; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        .card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: #303133; border-bottom: 2px solid #ffd4e5; padding-bottom: 0.8rem; }
+
+        /* 一号大厅布局 */
+        .hall1-layout { display: flex; gap: 2rem; justify-content: space-around; }
+        .hall1-left, .hall1-mid-left, .hall1-mid-right-top, .hall1-mid-right-bottom { display: grid; grid-template-columns: repeat(2, 100px); gap: 0.8rem; }
+        .hall1-right-section { display: flex; flex-direction: column; gap: 1.5rem; }
+        .hall1-right-top { display: grid; grid-template-columns: repeat(3, 100px); gap: 0.8rem; }
+        .hall1-right-bottom { display: grid; grid-template-columns: repeat(2, 100px); gap: 0.8rem; }
+
+        /* 二号大厅布局 */
+        .hall2-layout { display: flex; flex-direction: column; gap: 0.8rem; align-items: flex-start; }
+        .hall2-row { display: grid; grid-template-columns: repeat(4, 100px); gap: 0.8rem; }
+        .hall2-row.last { grid-template-columns: repeat(2, 100px); }
+
+        .seat-btn { padding: 1rem; border: 2px solid #e4e7ed; border-radius: 10px; background: white; color: #606266; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; min-height: 70px; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .seat-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(255, 173, 210, 0.3); border-color: #ffadd2; }
+        .seat-btn.occupied { background: linear-gradient(135deg, #ffd4e5 0%, #ffadd2 100%); color: white; border-color: #ffadd2; }
+        .seat-btn.timeout { background: linear-gradient(135deg, #f56c6c 0%, #f56c6c 100%); animation: shake 0.5s infinite; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .stat-card { background: linear-gradient(135deg, #ffd4e5 0%, #ffadd2 100%); color: white; padding: 1.5rem; border-radius: 10px; text-align: center; }
+        .stat-value { font-size: 2rem; font-weight: 700; margin: 0.5rem 0; }
+        .chart-container { width: 100%; height: 400px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="header">
+            <h1>拼豆店计时管理系统</h1>
+            <div>[[currentTime]]</div>
+        </div>
+
+        <el-tabs v-model="activeTab" style="padding: 1rem 2rem;">
+            <el-tab-pane label="座位管理" name="seats">
+                <div class="container">
+                    <div class="card">
+                        <div class="card-title">一号大厅 (1-31号)</div>
+                        <div class="hall1-layout">
+                            <div class="hall1-left">
+                                <button v-for="i in [1,2,3,4,5,6]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)">
+                                    <div>[[i]]号</div>
+                                    <template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template>
+                                </button>
+                            </div>
+                            <div class="hall1-mid-left">
+                                <button v-for="i in [7,8,9,10,11,12]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)">
+                                    <div>[[i]]号</div>
+                                    <template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template>
+                                </button>
+                            </div>
+                            <div>
+                                <div class="hall1-mid-right-top" style="margin-bottom:1.5rem;">
+                                    <button v-for="i in [13,14,15,16,17,18]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)">
+                                        <div>[[i]]号</div>
+                                        <template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template>
+                                    </button>
+                                </div>
+                                <div class="hall1-mid-right-bottom">
+                                    <button v-for="i in [19,20,21,22,23,24]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)">
+                                        <div>[[i]]号</div>
+                                        <template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="hall1-right-section">
+                                <div class="hall1-right-top">
+                                    <button v-for="i in [25,26,27]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)">
+                                        <div>[[i]]号</div>
+                                        <template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template>
+                                    </button>
+                                </div>
+                                <div class="hall1-right-bottom">
+                                    <button v-for="i in [28,29,30,31]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)">
+                                        <div>[[i]]号</div>
+                                        <template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">二号大厅 (32-49号)</div>
+                        <div class="hall2-layout">
+                            <div class="hall2-row"><button v-for="i in [32,33,34,35]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)"><div>[[i]]号</div><template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template></button></div>
+                            <div class="hall2-row"><button v-for="i in [36,37,38,39]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)"><div>[[i]]号</div><template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template></button></div>
+                            <div class="hall2-row"><button v-for="i in [40,41,42,43]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)"><div>[[i]]号</div><template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template></button></div>
+                            <div class="hall2-row"><button v-for="i in [44,45,46,47]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)"><div>[[i]]号</div><template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template></button></div>
+                            <div class="hall2-row last"><button v-for="i in [48,49]" :key="i" class="seat-btn" :class="getSeatClass(i)" @click="clickSeat(i)"><div>[[i]]号</div><template v-if="seats[i]"><div style="font-size:0.75rem;margin-top:0.3rem;">[[seats[i].package_name]]</div><div style="font-size:0.75rem;">[[formatTime(i)]]</div></template></button></div>
+                        </div>
+                    </div>
+                </div>
+            </el-tab-pane>
+
+            <el-tab-pane label="套餐管理" name="packages">
+                <div class="container"><div class="card">
+                    <el-button type="primary" @click="showAddPackage = true" style="margin-bottom:1rem;">添加套餐</el-button>
+                    <el-table :data="packages" stripe>
+                        <el-table-column prop="name" label="套餐名称"></el-table-column>
+                        <el-table-column prop="duration" label="时长(分钟)"></el-table-column>
+                        <el-table-column label="价格"><template #default="scope">¥[[scope.row.price]]</template></el-table-column>
+                        <el-table-column label="操作" width="200"><template #default="scope">
+                            <el-button size="small" type="primary" @click="editPackage(scope.row)">编辑</el-button>
+                            <el-button size="small" type="danger" @click="deletePackage(scope.row.id)">删除</el-button>
+                        </template></el-table-column>
+                    </el-table>
+                </div></div>
+            </el-tab-pane>
+
+            <el-tab-pane label="历史记录" name="records">
+                <div class="container"><div class="card">
+                    <el-button @click="loadRecords" type="primary" style="margin-bottom:1rem;">刷新</el-button>
+                    <el-table :data="records" stripe>
+                        <el-table-column prop="seat_num" label="座位" width="80"></el-table-column>
+                        <el-table-column prop="package_name" label="套餐"></el-table-column>
+                        <el-table-column label="价格" width="100"><template #default="scope">¥[[ scope.row.package_price ]]</template></el-table-column>
+                        <el-table-column prop="start_time" label="开始" width="170"></el-table-column>
+                        <el-table-column prop="end_time" label="结束" width="170"></el-table-column>
+                        <el-table-column label="状态" width="100"><template #default="scope">
+                            <el-tag v-if="scope.row.charged" type="success">已收费</el-tag>
+                            <el-tag v-else type="danger">未收费</el-tag>
+                        </template></el-table-column>
+                        <el-table-column label="操作" width="100"><template #default="scope">
+                            <el-button v-if="!scope.row.charged" size="small" type="warning" @click="chargeRecord(scope.row.seat_num)">收费</el-button>
+                        </template></el-table-column>
+                    </el-table>
+                </div></div>
+            </el-tab-pane>
+
+            <el-tab-pane label="今日统计" name="stats">
+                <div class="container">
+                    <div class="card">
+                        <div class="stats-grid">
+                            <div class="stat-card"><div>已收金额</div><div class="stat-value">¥[[stats.total_income]]</div></div>
+                            <div class="stat-card"><div>未收金额</div><div class="stat-value">¥[[stats.unpaid]]</div></div>
+                            <div class="stat-card"><div>订单数</div><div class="stat-value">[[stats.total_orders]]</div></div>
+                            <div class="stat-card"><div>总金额</div><div class="stat-value">¥[[(stats.total_income + stats.unpaid).toFixed(2)]]</div></div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">套餐销售分析</div>
+                        <div id="packageChart" class="chart-container"></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">收入统计</div>
+                        <div id="incomeChart" class="chart-container"></div>
+                    </div>
+                </div>
+            </el-tab-pane>
+        </el-tabs>
+
+        <el-dialog v-model="startDialog" title="开始计时" width="400px">
+            <el-form label-width="100px">
+                <el-form-item label="座位号"><el-input v-model="startForm.seatNum" readonly></el-input></el-form-item>
+                <el-form-item label="选择套餐"><el-select v-model="startForm.packageId" style="width:100%"><el-option v-for="pkg in packages" :key="pkg.id" :label="`${pkg.name} - ${pkg.duration}分钟 - ¥${pkg.price}`" :value="pkg.id"></el-option></el-select></el-form-item>
+                <el-form-item label="顾客信息"><el-input v-model="startForm.customerInfo" type="textarea" :rows="2"></el-input></el-form-item>
+            </el-form>
+            <template #footer><el-button @click="startDialog = false">取消</el-button><el-button type="primary" @click="confirmStart">开始</el-button></template>
+        </el-dialog>
+
+        <el-dialog v-model="showAddPackage" title="添加套餐" width="400px">
+            <el-form label-width="100px">
+                <el-form-item label="套餐名称"><el-input v-model="newPackage.name"></el-input></el-form-item>
+                <el-form-item label="时长(分钟)"><el-input-number v-model="newPackage.duration" :min="1"></el-input-number></el-form-item>
+                <el-form-item label="价格(元)"><el-input-number v-model="newPackage.price" :min="0" :precision="2"></el-input-number></el-form-item>
+            </el-form>
+            <template #footer><el-button @click="showAddPackage = false">取消</el-button><el-button type="primary" @click="addPackage">添加</el-button></template>
+        </el-dialog>
+
+        <el-dialog v-model="showEditPackage" title="编辑套餐" width="400px">
+            <el-form label-width="100px">
+                <el-form-item label="套餐名称"><el-input v-model="editForm.name"></el-input></el-form-item>
+                <el-form-item label="时长(分钟)"><el-input-number v-model="editForm.duration" :min="1"></el-input-number></el-form-item>
+                <el-form-item label="价格(元)"><el-input-number v-model="editForm.price" :min="0" :precision="2"></el-input-number></el-form-item>
+            </el-form>
+            <template #footer><el-button @click="showEditPackage = false">取消</el-button><el-button type="primary" @click="confirmEdit">保存</el-button></template>
+        </el-dialog>
+    </div>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/element-plus"></script>
+    <script>
+        const { createApp } = Vue;
+        const API_BASE = 'http://localhost:5003/api';
+
+        createApp({
+            data() {
+                return {
+                    activeTab: 'seats',
+                    currentTime: '',
+                    seats: {},
+                    packages: [],
+                    records: [],
+                    stats: { total_income: 0, unpaid: 0, total_orders: 0, package_stats: [] },
+                    startDialog: false,
+                    startForm: { seatNum: '', packageId: null, customerInfo: '', currentSeatNum: null },
+                    showAddPackage: false,
+                    newPackage: { name: '', duration: 180, price: 68 },
+                    showEditPackage: false,
+                    editForm: { id: null, name: '', duration: 0, price: 0 }
+                }
+            },
+            mounted() {
+                this.updateTime();
+                setInterval(this.updateTime, 1000);
+                this.loadSeats();
+                setInterval(this.loadSeats, 1000);
+                this.loadPackages();
+            },
+            watch: {
+                activeTab(val) {
+                    if (val === 'stats') this.loadStats();
+                    if (val === 'records') this.loadRecords();
+                }
+            },
+            methods: {
+                updateTime() { this.currentTime = new Date().toLocaleString('zh-CN'); },
+                async loadSeats() { this.seats = await (await fetch(`${API_BASE}/seats`)).json(); },
+                async loadPackages() { this.packages = await (await fetch(`${API_BASE}/packages`)).json(); },
+                async loadRecords() { this.records = await (await fetch(`${API_BASE}/records`)).json(); },
+                async loadStats() {
+                    this.stats = await (await fetch(`${API_BASE}/stats/today`)).json();
+                    this.$nextTick(() => { this.renderCharts(); });
+                },
+                getSeatClass(num) {
+                    if (!this.seats[num]) return '';
+                    const elapsed = (new Date() - new Date(this.seats[num].start_time)) / 1000 / 60;
+                    return elapsed >= this.seats[num].package_duration ? 'occupied timeout' : 'occupied';
+                },
+                formatTime(num) {
+                    if (!this.seats[num]) return '';
+                    const elapsed = Math.floor((new Date() - new Date(this.seats[num].start_time)) / 1000);
+                    return `${String(Math.floor(elapsed/3600)).padStart(2,'0')}:${String(Math.floor((elapsed%3600)/60)).padStart(2,'0')}:${String(elapsed%60).padStart(2,'0')}`;
+                },
+                async clickSeat(num) {
+                    if (this.seats[num]) {
+                        try {
+                            await this.$confirm(`${num}号座位正在使用中，是否结束计时？`, '确认', { type: 'warning' });
+                            const data = await (await fetch(`${API_BASE}/seats/${num}/stop`, { method: 'POST' })).json();
+                            if (data.success) this.$message.success(`计时已结束`);
+                        } catch {}
+                    } else {
+                        this.startForm = { seatNum: `${num}号`, packageId: null, customerInfo: '', currentSeatNum: num };
+                        this.startDialog = true;
+                    }
+                },
+                async confirmStart() {
+                    const pkg = this.packages.find(p => p.id === this.startForm.packageId);
+                    await fetch(`${API_BASE}/seats/${this.startForm.currentSeatNum}/start`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ package_name: pkg.name, package_duration: pkg.duration, package_price: pkg.price, customer_info: this.startForm.customerInfo })
+                    });
+                    this.startDialog = false;
+                    this.$message.success('开始计时！');
+                },
+                async chargeRecord(seatNum) {
+                    await fetch(`${API_BASE}/seats/${seatNum}/charge`, { method: 'POST' });
+                    this.$message.success('已标记为收费完成！');
+                    this.loadRecords();
+                },
+                async addPackage() {
+                    const res = await fetch(`${API_BASE}/packages`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.newPackage)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        this.$message.success('套餐添加成功！');
+                        this.showAddPackage = false;
+                        this.newPackage = { name: '', duration: 180, price: 68 };
+                        this.loadPackages();
+                    } else {
+                        this.$message.error(data.error);
+                    }
+                },
+                editPackage(pkg) {
+                    this.editForm = { ...pkg };
+                    this.showEditPackage = true;
+                },
+                async confirmEdit() {
+                    await fetch(`${API_BASE}/packages/${this.editForm.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.editForm)
+                    });
+                    this.$message.success('套餐更新成功！');
+                    this.showEditPackage = false;
+                    this.loadPackages();
+                },
+                async deletePackage(id) {
+                    try {
+                        await this.$confirm('确定删除此套餐？', '确认', { type: 'warning' });
+                        const res = await fetch(`${API_BASE}/packages/${id}`, { method: 'DELETE' });
+                        const data = await res.json();
+                        if (data.success) {
+                            this.$message.success('套餐删除成功！');
+                            this.loadPackages();
+                        } else {
+                            this.$message.error(data.error);
+                        }
+                    } catch {}
+                },
+                renderCharts() {
+                    if (!this.stats.package_stats || this.stats.package_stats.length === 0) return;
+
+                    // 饼图
+                    const pieChart = echarts.init(document.getElementById('packageChart'));
+                    pieChart.setOption({
+                        title: { text: '套餐销售占比', left: 'center' },
+                        tooltip: { trigger: 'item' },
+                        series: [{
+                            type: 'pie',
+                            radius: '60%',
+                            data: this.stats.package_stats.map(p => ({ value: p.income, name: p.name })),
+                            emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                        }]
+                    });
+
+                    // 柱状图
+                    const barChart = echarts.init(document.getElementById('incomeChart'));
+                    barChart.setOption({
+                        title: { text: '各套餐收入统计', left: 'center' },
+                        tooltip: { trigger: 'axis' },
+                        xAxis: { type: 'category', data: this.stats.package_stats.map(p => p.name) },
+                        yAxis: { type: 'value', name: '金额(元)' },
+                        series: [{
+                            type: 'bar',
+                            data: this.stats.package_stats.map(p => p.income),
+                            itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#ffd4e5' }, { offset: 1, color: '#ffadd2' }]) }
+                        }]
+                    });
+                }
+            },
+            delimiters: ['[[', ']]']
+        }).use(ElementPlus).mount('#app');
+    </script>
+</body>
+</html>
