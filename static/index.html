@@ -121,7 +121,15 @@
 
             <el-tab-pane label="历史记录" name="records">
                 <div class="container"><div class="card">
-                    <el-button @click="loadRecords" type="primary" style="margin-bottom:1rem;">刷新</el-button>
+                    <div style="margin-bottom:1rem;">
+                        <el-date-picker v-model="recordDateRange" type="daterange" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" format="YYYY-MM-DD" value-format="YYYY-MM-DD" @change="loadRecords" style="margin-right:1rem;"></el-date-picker>
+                        <el-select v-model="recordPackageFilter" clearable placeholder="全部套餐" @change="loadRecords" style="width:200px;margin-right:1rem;">
+                            <el-option label="全部套餐" value=""></el-option>
+                            <el-option v-for="pkg in packages" :key="pkg.id" :label="pkg.name" :value="pkg.name"></el-option>
+                        </el-select>
+                        <el-button @click="loadRecords" type="primary">刷新</el-button>
+                        <el-button @click="exportExcel" type="success" style="margin-left:1rem;">导出Excel</el-button>
+                    </div>
                     <el-table :data="records" stripe>
                         <el-table-column prop="seat_num" label="座位" width="80"></el-table-column>
                         <el-table-column prop="package_name" label="套餐"></el-table-column>
@@ -140,23 +148,45 @@
                 </div></div>
             </el-tab-pane>
 
-            <el-tab-pane label="今日统计" name="stats">
+            <el-tab-pane label="数据统计" name="stats">
                 <div class="container">
                     <div class="card">
-                        <div class="stats-grid">
+                        <el-radio-group v-model="statsType" @change="loadStats" style="margin-bottom:1.5rem;">
+                            <el-radio-button value="day">单日</el-radio-button>
+                            <el-radio-button value="month">月度</el-radio-button>
+                            <el-radio-button value="year">年度</el-radio-button>
+                        </el-radio-group>
+
+                        <el-date-picker v-if="statsType === 'day'" v-model="selectedDate" type="date" placeholder="选择日期" @change="loadStats" format="YYYY-MM-DD" value-format="YYYY-MM-DD" style="margin-left:1rem;"></el-date-picker>
+                        <el-date-picker v-if="statsType === 'month'" v-model="selectedMonth" type="month" placeholder="选择月份" @change="loadStats" format="YYYY-MM" value-format="YYYY-MM" style="margin-left:1rem;"></el-date-picker>
+                        <el-date-picker v-if="statsType === 'year'" v-model="selectedYear" type="year" placeholder="选择年份" @change="loadStats" format="YYYY" value-format="YYYY" style="margin-left:1rem;"></el-date-picker>
+
+                        <div class="stats-grid" style="margin-top:1.5rem;">
                             <div class="stat-card"><div>已收金额</div><div class="stat-value">¥[[stats.total_income]]</div></div>
                             <div class="stat-card"><div>未收金额</div><div class="stat-value">¥[[stats.unpaid]]</div></div>
                             <div class="stat-card"><div>订单数</div><div class="stat-value">[[stats.total_orders]]</div></div>
                             <div class="stat-card"><div>总金额</div><div class="stat-value">¥[[(stats.total_income + stats.unpaid).toFixed(2)]]</div></div>
                         </div>
                     </div>
-                    <div class="card">
-                        <div class="card-title">套餐销售分析</div>
-                        <div id="packageChart" class="chart-container"></div>
+
+                    <div class="card" v-if="statsType === 'day'">
+                        <div class="card-title">套餐销售占比</div>
+                        <div id="packagePieChart" class="chart-container"></div>
                     </div>
+
+                    <div class="card" v-if="statsType === 'month'">
+                        <div class="card-title">本月每日收入趋势</div>
+                        <div id="monthTrendChart" class="chart-container"></div>
+                    </div>
+
+                    <div class="card" v-if="statsType === 'year'">
+                        <div class="card-title">全年每月收入统计（点击查看详情）</div>
+                        <div id="yearBarChart" class="chart-container"></div>
+                    </div>
+
                     <div class="card">
-                        <div class="card-title">收入统计</div>
-                        <div id="incomeChart" class="chart-container"></div>
+                        <div class="card-title">套餐收入统计</div>
+                        <div id="packageBarChart" class="chart-container"></div>
                     </div>
                 </div>
             </el-tab-pane>
@@ -204,7 +234,13 @@
                     seats: {},
                     packages: [],
                     records: [],
-                    stats: { total_income: 0, unpaid: 0, total_orders: 0, package_stats: [] },
+                    recordDateRange: null,
+                    recordPackageFilter: '',
+                    stats: { total_income: 0, unpaid: 0, total_orders: 0, package_stats: [], daily_data: [], monthly_data: [] },
+                    statsType: 'day',
+                    selectedDate: new Date().toISOString().split('T')[0],
+                    selectedMonth: new Date().toISOString().slice(0, 7),
+                    selectedYear: new Date().getFullYear().toString(),
                     startDialog: false,
                     startForm: { seatNum: '', packageId: null, customerInfo: '', currentSeatNum: null },
                     showAddPackage: false,
@@ -230,7 +266,16 @@
                 updateTime() { this.currentTime = new Date().toLocaleString('zh-CN'); },
                 async loadSeats() { this.seats = await (await fetch(`${API_BASE}/seats`)).json(); },
                 async loadPackages() { this.packages = await (await fetch(`${API_BASE}/packages`)).json(); },
-                async loadRecords() { this.records = await (await fetch(`${API_BASE}/records`)).json(); },
+                async loadRecords() {
+                    let url = `${API_BASE}/records?`;
+                    if (this.recordDateRange && this.recordDateRange.length === 2) {
+                        url += `start_date=${this.recordDateRange[0]}&end_date=${this.recordDateRange[1]}&`;
+                    }
+                    if (this.recordPackageFilter) {
+                        url += `package_name=${encodeURIComponent(this.recordPackageFilter)}&`;
+                    }
+                    this.records = await (await fetch(url)).json();
+                },
                 async loadStats() {
                     this.stats = await (await fetch(`${API_BASE}/stats/today`)).json();
                     this.$nextTick(() => { this.renderCharts(); });
@@ -269,7 +314,12 @@
                     await fetch(`${API_BASE}/seats/${this.startForm.currentSeatNum}/start`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ package_name: pkg.name, package_duration: pkg.duration, package_price: pkg.price, customer_info: this.startForm.customerInfo })
+                        body: JSON.stringify({
+                            package_name: pkg.name,
+                            package_duration: pkg.duration,
+                            package_price: pkg.price,
+                            customer_info: this.startForm.customerInfo
+                        })
                     });
                     this.startDialog = false;
                     this.$message.success('开始计时！');
@@ -322,26 +372,21 @@
                         }
                     } catch {}
                 },
+                async loadStats() {
+                    let url = `${API_BASE}/stats/`;
+                    if (this.statsType === 'day') url += `day?date=${this.selectedDate}`;
+                    else if (this.statsType === 'month') url += `month?month=${this.selectedMonth}`;
+                    else if (this.statsType === 'year') url += `year?year=${this.selectedYear}`;
+
+                    this.stats = await (await fetch(url)).json();
+                    this.$nextTick(() => { this.renderCharts(); });
+                },
                 renderCharts() {
                     if (!this.stats.package_stats || this.stats.package_stats.length === 0) return;
 
-                    // 饼图
-                    const pieChart = echarts.init(document.getElementById('packageChart'));
-                    pieChart.setOption({
-                        title: { text: '套餐销售占比', left: 'center' },
-                        tooltip: { trigger: 'item' },
-                        series: [{
-                            type: 'pie',
-                            radius: '60%',
-                            data: this.stats.package_stats.map(p => ({ value: p.income, name: p.name })),
-                            emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
-                        }]
-                    });
-
-                    // 柱状图
-                    const barChart = echarts.init(document.getElementById('incomeChart'));
-                    barChart.setOption({
-                        title: { text: '各套餐收入统计', left: 'center' },
+                    // 套餐收入柱状图（所有模式都显示）
+                    const packageBarChart = echarts.init(document.getElementById('packageBarChart'));
+                    packageBarChart.setOption({
                         tooltip: { trigger: 'axis' },
                         xAxis: { type: 'category', data: this.stats.package_stats.map(p => p.name) },
                         yAxis: { type: 'value', name: '金额(元)' },
@@ -351,6 +396,61 @@
                             itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#ffd4e5' }, { offset: 1, color: '#ffadd2' }]) }
                         }]
                     });
+
+                    // 单日模式：饼图
+                    if (this.statsType === 'day') {
+                        const pieChart = echarts.init(document.getElementById('packagePieChart'));
+                        pieChart.setOption({
+                            tooltip: { trigger: 'item' },
+                            series: [{
+                                type: 'pie',
+                                radius: '60%',
+                                data: this.stats.package_stats.map(p => ({ value: p.income, name: p.name })),
+                                emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                            }]
+                        });
+                    }
+
+                    // 月度模式：每日收入趋势线
+                    if (this.statsType === 'month' && this.stats.daily_data) {
+                        const lineChart = echarts.init(document.getElementById('monthTrendChart'));
+                        lineChart.setOption({
+                            tooltip: { trigger: 'axis' },
+                            xAxis: { type: 'category', data: this.stats.daily_data.map(d => d.date.split('-')[2] + '日') },
+                            yAxis: { type: 'value', name: '金额(元)' },
+                            series: [{
+                                type: 'line',
+                                data: this.stats.daily_data.map(d => d.income),
+                                smooth: true,
+                                areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(255, 212, 229, 0.8)' }, { offset: 1, color: 'rgba(255, 212, 229, 0.1)' }]) },
+                                lineStyle: { color: '#ffadd2' },
+                                itemStyle: { color: '#ffadd2' }
+                            }]
+                        });
+                    }
+
+                    // 年度模式：每月收入柱状图（可点击查看详情）
+                    if (this.statsType === 'year' && this.stats.monthly_data) {
+                        const yearChart = echarts.init(document.getElementById('yearBarChart'));
+                        yearChart.setOption({
+                            tooltip: { trigger: 'axis' },
+                            xAxis: { type: 'category', data: this.stats.monthly_data.map(m => m.month + '月') },
+                            yAxis: { type: 'value', name: '金额(元)' },
+                            series: [{
+                                type: 'bar',
+                                data: this.stats.monthly_data.map(m => m.income),
+                                itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#ffd4e5' }, { offset: 1, color: '#ffadd2' }]) }
+                            }]
+                        });
+
+                        // 点击柱状图切换到该月的详细数据
+                        yearChart.on('click', (params) => {
+                            const monthData = this.stats.monthly_data[params.dataIndex];
+                            this.statsType = 'month';
+                            this.selectedMonth = `${this.selectedYear}-${String(monthData.month).padStart(2, '0')}`;
+                            this.loadStats();
+                        });
+                    }
                 }
             },
             delimiters: ['[[', ']]']

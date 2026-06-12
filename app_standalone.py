@@ -5,6 +5,9 @@ from datetime import datetime, timedelta
 import json
 import os
 import sys
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from io import BytesIO
 
 if getattr(sys, 'frozen', False):
     os.chdir(sys._MEIPASS)
@@ -47,6 +50,18 @@ class Database:
                 顾客信息 TEXT,
                 日期 TEXT,
                 已收费 INTEGER DEFAULT 0
+            )
+        ''')
+
+        # 当前计时状态表（新增）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS 当前计时状态 (
+                座位号 INTEGER PRIMARY KEY,
+                套餐名称 TEXT,
+                套餐时长 INTEGER,
+                套餐价格 REAL,
+                开始时间 TEXT,
+                顾客信息 TEXT
             )
         ''')
 
@@ -100,8 +115,26 @@ class Database:
         conn.commit()
         conn.close()
 
+    def load_active_timers(self):
+        """从数据库加载正在计时的座位"""
+        conn = self.get_conn()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM 当前计时状态')
+        timers = {}
+        for row in cursor.fetchall():
+            timers[row[0]] = {
+                'is_occupied': True,
+                'package_name': row[1],
+                'package_duration': row[2],
+                'package_price': row[3],
+                'start_time': row[4],
+                'customer_info': row[5]
+            }
+        conn.close()
+        return timers
+
 db = Database()
-seats_status = {}
+seats_status = db.load_active_timers()  # 启动时从数据库恢复计时状态
 
 @app.route('/')
 def index():
@@ -124,6 +157,18 @@ def start_timing(seat_num):
         'coupon_id': data.get('coupon_id'),
         'start_time': datetime.now().isoformat()
     }
+
+    # 持久化到数据库
+    conn = db.get_conn()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO 当前计时状态 (座位号, 套餐名称, 套餐时长, 套餐价格, 开始时间, 顾客信息)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (seat_num, data['package_name'], data['package_duration'], data['package_price'],
+          seats_status[seat_num]['start_time'], data.get('customer_info', '')))
+    conn.commit()
+    conn.close()
+
     return jsonify({'success': True})
 
 @app.route('/api/seats/<int:seat_num>/stop', methods=['POST'])
@@ -154,6 +199,13 @@ def stop_timing(seat_num):
         datetime.now().strftime('%Y-%m-%d'),
         0
     ))
+    conn.commit()
+    conn.close()
+
+    # 从数据库删除计时状态
+    conn = db.get_conn()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM 当前计时状态 WHERE 座位号 = ?', (seat_num,))
     conn.commit()
     conn.close()
 
@@ -297,7 +349,26 @@ def add_coupon():
 def get_records():
     conn = db.get_conn()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM 计时记录 ORDER BY id DESC LIMIT 100')
+
+    # 构建查询条件
+    conditions = []
+    params = []
+
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    package_name = request.args.get('package_name')
+
+    if start_date and end_date:
+        conditions.append('日期 BETWEEN ? AND ?')
+        params.extend([start_date, end_date])
+
+    if package_name:
+        conditions.append('套餐名称 = ?')
+        params.append(package_name)
+
+    where_clause = ' WHERE ' + ' AND '.join(conditions) if conditions else ''
+
+    cursor.execute(f'SELECT * FROM 计时记录{where_clause} ORDER BY id DESC LIMIT 100', params)
     records = [{
         'id': row[0],
         'seat_num': row[1],
@@ -314,16 +385,91 @@ def get_records():
     conn.close()
     return jsonify(records)
 
-@app.route('/api/stats/today', methods=['GET'])
-def get_today_stats():
-    today = datetime.now().strftime('%Y-%m-%d')
+@app.route('/api/export/excel', methods=['GET'])
+def export_excel():
     conn = db.get_conn()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 = ? AND 已收费 = 1', (today,))
+    # 获取筛选参数
+    conditions = []
+    params = []
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    package_name = request.args.get('package_name')
+
+    if start_date and end_date:
+        conditions.append('日期 BETWEEN ? AND ?')
+        params.extend([start_date, end_date])
+    if package_name:
+        conditions.append('套餐名称 = ?')
+        params.append(package_name)
+
+    where_clause = ' WHERE ' + ' AND '.join(conditions) if conditions else ''
+    cursor.execute(f'SELECT * FROM 计时记录{where_clause} ORDER BY id DESC', params)
+    records = cursor.fetchall()
+    conn.close()
+
+    # 创建Excel
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "计时记录"
+
+    # 表头样式
+    header_fill = PatternFill(start_color="FFD4E5", end_color="FFD4E5", fill_type="solid")
+    header_font = Font(bold=True, size=12)
+    border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+    # 写入表头
+    headers = ['ID', '座位号', '套餐名称', '套餐时长(分钟)', '套餐价格', '开始时间', '结束时间', '实际时长', '顾客信息', '日期', '收费状态']
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = border
+
+    # 写入数据
+    for row in records:
+        ws.append([
+            row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7],
+            row[8], row[9], '已收费' if row[10] else '未收费'
+        ])
+        for cell in ws[ws.max_row]:
+            cell.border = border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    # 调整列宽
+    ws.column_dimensions['A'].width = 8
+    ws.column_dimensions['B'].width = 10
+    ws.column_dimensions['C'].width = 15
+    ws.column_dimensions['D'].width = 15
+    ws.column_dimensions['E'].width = 12
+    ws.column_dimensions['F'].width = 20
+    ws.column_dimensions['G'].width = 20
+    ws.column_dimensions['H'].width = 12
+    ws.column_dimensions['I'].width = 20
+    ws.column_dimensions['J'].width = 12
+    ws.column_dimensions['K'].width = 12
+
+    # 保存到内存
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f'计时记录_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     as_attachment=True, download_name=filename)
+
+@app.route('/api/stats/day', methods=['GET'])
+def get_day_stats():
+    date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+    conn = db.get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 = ? AND 已收费 = 1', (date,))
     total_income = cursor.fetchone()[0] or 0
 
-    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 = ? AND 已收费 = 0', (today,))
+    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 = ? AND 已收费 = 0', (date,))
     unpaid = cursor.fetchone()[0] or 0
 
     cursor.execute('''
@@ -331,10 +477,10 @@ def get_today_stats():
         FROM 计时记录
         WHERE 日期 = ?
         GROUP BY 套餐名称
-    ''', (today,))
+    ''', (date,))
     package_stats = [{'name': row[0], 'count': row[1], 'income': row[2]} for row in cursor.fetchall()]
 
-    cursor.execute('SELECT COUNT(*) FROM 计时记录 WHERE 日期 = ?', (today,))
+    cursor.execute('SELECT COUNT(*) FROM 计时记录 WHERE 日期 = ?', (date,))
     total_orders = cursor.fetchone()[0]
 
     conn.close()
@@ -343,6 +489,90 @@ def get_today_stats():
         'unpaid': unpaid,
         'package_stats': package_stats,
         'total_orders': total_orders
+    })
+
+@app.route('/api/stats/month', methods=['GET'])
+def get_month_stats():
+    month = request.args.get('month', datetime.now().strftime('%Y-%m'))
+    conn = db.get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 LIKE ? AND 已收费 = 1', (month + '%',))
+    total_income = cursor.fetchone()[0] or 0
+
+    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 LIKE ? AND 已收费 = 0', (month + '%',))
+    unpaid = cursor.fetchone()[0] or 0
+
+    cursor.execute('''
+        SELECT 套餐名称, COUNT(*), SUM(套餐价格)
+        FROM 计时记录
+        WHERE 日期 LIKE ?
+        GROUP BY 套餐名称
+    ''', (month + '%',))
+    package_stats = [{'name': row[0], 'count': row[1], 'income': row[2]} for row in cursor.fetchall()]
+
+    cursor.execute('SELECT COUNT(*) FROM 计时记录 WHERE 日期 LIKE ?', (month + '%',))
+    total_orders = cursor.fetchone()[0]
+
+    # 每日收入趋势
+    cursor.execute('''
+        SELECT 日期, SUM(套餐价格) as income
+        FROM 计时记录
+        WHERE 日期 LIKE ?
+        GROUP BY 日期
+        ORDER BY 日期
+    ''', (month + '%',))
+    daily_data = [{'date': row[0], 'income': row[1]} for row in cursor.fetchall()]
+
+    conn.close()
+    return jsonify({
+        'total_income': total_income,
+        'unpaid': unpaid,
+        'package_stats': package_stats,
+        'total_orders': total_orders,
+        'daily_data': daily_data
+    })
+
+@app.route('/api/stats/year', methods=['GET'])
+def get_year_stats():
+    year = request.args.get('year', str(datetime.now().year))
+    conn = db.get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 LIKE ? AND 已收费 = 1', (year + '%',))
+    total_income = cursor.fetchone()[0] or 0
+
+    cursor.execute('SELECT SUM(套餐价格) FROM 计时记录 WHERE 日期 LIKE ? AND 已收费 = 0', (year + '%',))
+    unpaid = cursor.fetchone()[0] or 0
+
+    cursor.execute('''
+        SELECT 套餐名称, COUNT(*), SUM(套餐价格)
+        FROM 计时记录
+        WHERE 日期 LIKE ?
+        GROUP BY 套餐名称
+    ''', (year + '%',))
+    package_stats = [{'name': row[0], 'count': row[1], 'income': row[2]} for row in cursor.fetchall()]
+
+    cursor.execute('SELECT COUNT(*) FROM 计时记录 WHERE 日期 LIKE ?', (year + '%',))
+    total_orders = cursor.fetchone()[0]
+
+    # 每月收入统计
+    cursor.execute('''
+        SELECT substr(日期, 6, 2) as month, SUM(套餐价格) as income
+        FROM 计时记录
+        WHERE 日期 LIKE ?
+        GROUP BY substr(日期, 6, 2)
+        ORDER BY month
+    ''', (year + '%',))
+    monthly_data = [{'month': int(row[0]), 'income': row[1]} for row in cursor.fetchall()]
+
+    conn.close()
+    return jsonify({
+        'total_income': total_income,
+        'unpaid': unpaid,
+        'package_stats': package_stats,
+        'total_orders': total_orders,
+        'monthly_data': monthly_data
     })
 
 @app.route('/api/check-timeout', methods=['GET'])
